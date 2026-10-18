@@ -1,0 +1,9 @@
+data:
+  raw_dir: data/ModelNet10
+  prepared_dir: data/prepared
+  num_points: 1024
+  val_fraction: 0.1
+  seed: 42
+
+model:
+  feature_transform: true
