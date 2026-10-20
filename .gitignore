@@ -20,3 +20,5 @@ wheels/
 models/
 checkpoints/
 reports/
+
+.ruff_cache/
