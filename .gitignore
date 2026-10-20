@@ -15,3 +15,8 @@ wheels/
 
 *.db
 *.env
+
+# Pipeline outputs
+models/
+checkpoints/
+reports/

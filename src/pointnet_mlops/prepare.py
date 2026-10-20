@@ -7,17 +7,12 @@ from multiprocessing import Pool
 
 import numpy as np
 import trimesh
-import yaml
 from tqdm import tqdm
 
 from pointnet_mlops.data import CLASSES, NUM_CLASSES, SPLITS
+from pointnet_mlops.utils import load_params
 
 REPORT_PATH = "reports/prepare_report.json"
-
-
-def load_params(path="params.yaml"):
-    with open(path) as f:
-        return yaml.safe_load(f)
 
 
 def list_meshes(raw_dir, split):
@@ -65,14 +60,20 @@ def stratified_split(labels, val_fraction, seed):
 
 def validate(split, points, labels, num_points):
     if points.ndim != 3 or points.shape[1:] != (num_points, 3):
-        raise ValueError(f"{split}: expected shape (N, {num_points}, 3), got {points.shape}")
+        raise ValueError(
+            f"{split}: expected shape (N, {num_points}, 3), got {points.shape}"
+        )
     if len(points) != len(labels):
-        raise ValueError(f"{split}: {len(points)} point clouds but {len(labels)} labels")
+        raise ValueError(
+            f"{split}: {len(points)} point clouds but {len(labels)} labels"
+        )
     if not np.isfinite(points).all():
         raise ValueError(f"{split}: points contain NaN or inf")
     missing = sorted(set(range(NUM_CLASSES)) - set(labels.tolist()))
     if missing:
-        raise ValueError(f"{split}: no samples for classes {[CLASSES[i] for i in missing]}")
+        raise ValueError(
+            f"{split}: no samples for classes {[CLASSES[i] for i in missing]}"
+        )
 
 
 def main():
@@ -92,7 +93,9 @@ def main():
     print(f"sampling {len(train_items)} train meshes")
     trainval_points, trainval_labels = sample_all(train_items, num_points, seed)
     print(f"sampling {len(test_items)} test meshes")
-    test_points, test_labels = sample_all(test_items, num_points, seed + len(train_items))
+    test_points, test_labels = sample_all(
+        test_items, num_points, seed + len(train_items)
+    )
 
     train_idx, val_idx = stratified_split(trainval_labels, params["val_fraction"], seed)
     splits = {
@@ -109,7 +112,7 @@ def main():
         np.savez(os.path.join(out_dir, f"{split}.npz"), points=points, labels=labels)
         counts = np.bincount(labels, minlength=NUM_CLASSES)
         report[split] = {
-            "total": int(len(labels)),
+            "total": len(labels),
             "per_class": {name: int(c) for name, c in zip(CLASSES, counts)},
         }
 

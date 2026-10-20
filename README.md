@@ -1,6 +1,8 @@
 ```
-uv run python -m pointnet_mlops.prepare     # only needed once, or after changing data params
-uv run python -m pointnet_mlops.train --nepoch 1
+uv run python -m pointnet_mlops.prepare          # only needed once to prepare your data, or after changing data params
+
+uv run python -m pointnet_mlops.train            # fresh run
+uv run python -m pointnet_mlops.train --resume   # continue after an interruption
 ```
 
 ## Model

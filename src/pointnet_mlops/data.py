@@ -2,7 +2,7 @@ import os
 
 import numpy as np
 import torch
-import torch.utils.data as data
+from torch.utils import data
 
 # ModelNet10 class names, matching the directory names in data/ModelNet10. Label = index.
 CLASSES = (
@@ -44,12 +44,17 @@ class ModelNet10Dataset(data.Dataset):
             # ModelNet is z-up, so rotate about z (upstream rotated x/z for y-up ShapeNet)
             theta = np.random.uniform(0, np.pi * 2)
             rotation_matrix = np.array(
-                [[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]], dtype=np.float32
+                [[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]],
+                dtype=np.float32,
             )
             point_set[:, :2] = point_set[:, :2] @ rotation_matrix  # random rotation
-            point_set += np.random.normal(0, 0.02, size=point_set.shape).astype(np.float32)  # random jitter
+            point_set += np.random.normal(0, 0.02, size=point_set.shape).astype(
+                np.float32
+            )  # random jitter
 
-        return torch.from_numpy(point_set), torch.tensor(self.labels[index], dtype=torch.long)
+        return torch.from_numpy(point_set), torch.tensor(
+            self.labels[index], dtype=torch.long
+        )
 
 
 def make_loaders(prepared_dir, batch_size, num_workers=0):
