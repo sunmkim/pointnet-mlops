@@ -49,7 +49,7 @@ def main():
         raise ValueError(f"{args.model} was trained on classes {saved_model['classes']}, expected {CLASSES}")
     model = PointNetCls(k=NUM_CLASSES, feature_transform=saved_model["feature_transform"]).to(device)
     model.load_state_dict(saved_model["model"])
-    print(f"loaded {args.model} (epoch {saved_model['epoch']}, val acc {saved_model['val_acc']:.4f})")
+    print(f"loaded {args.model} (epoch {saved_model['epoch']}, val acc {saved_model['val_accuracy']:.4f})")
 
     # set the model to evaluation mode: dropout off, BatchNorm uses its running statistics
     model.eval()
