@@ -2090,12 +2090,22 @@ wheels = [
 ]
 
 [[package]]
+name = "pip"
+version = "26.2.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/fa/e8/0842d757e483e895e670f655084cfe8b8c72580c6769a76b30b2789a0608/pip-26.2.2.tar.gz", hash = "sha256:3a8e5c800492787f33a4114ef54444546c340df428974ebba17e0fd47e11af2f", size = 1863336, upload-time = "2026-10-20T16:36:29.008Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl", hash = "sha256:fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70", size = 1819850, upload-time = "2026-10-20T16:36:27.046Z" },
+]
+
+[[package]]
 name = "pointnet-mlops"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "mlflow" },
     { name = "numpy" },
+    { name = "pip" },
     { name = "pyyaml" },
     { name = "torch" },
     { name = "tqdm" },
@@ -2111,6 +2121,7 @@ dev = [
 requires-dist = [
     { name = "mlflow", specifier = ">=3.17.1" },
     { name = "numpy", specifier = ">=2.5.4" },
+    { name = "pip", specifier = ">=26.2.2" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "torch", specifier = ">=2.14.1" },
     { name = "tqdm", specifier = ">=4.70.1" },

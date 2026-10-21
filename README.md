@@ -1,4 +1,4 @@
-
+# PointNet MLOps
 
 ## Model
 
@@ -25,4 +25,10 @@ uv run python -m pointnet_mlops.train --resume   # continue after an interruptio
 ```
 uv run python -m pointnet_mlops.evaluate
 uv run python -m pointnet_mlops.evaluate --model path/to/model.pt   # re-score another model
+```
+
+## MLOps
+### MLFlow
+```bash
+mlflow server --port 5000
 ```

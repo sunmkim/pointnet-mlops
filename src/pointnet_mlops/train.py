@@ -10,12 +10,18 @@ import argparse
 import csv
 import os
 import time
+import numpy as np
 
 import torch
 import torch.nn.functional as F
 from torch import optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+
+import mlflow
+import mlflow.pytorch
+from mlflow.models import ModelSignature
+from mlflow.types import Schema, TensorSpec
 
 from pointnet_mlops.data import CLASSES, NUM_CLASSES, ModelNet10Dataset
 from pointnet_mlops.model import PointNetCls, feature_transform_regularizer
@@ -34,9 +40,9 @@ LOG_FIELDS = [
     "epoch",
     "lr",
     "train_loss",
-    "train_acc",
+    "train_accuracy",
     "val_loss",
-    "val_acc",
+    "val_accuracy",
     "seconds",
 ]
 
@@ -83,7 +89,7 @@ def run_epoch(
     return total_loss / total_seen, total_correct / total_seen
 
 
-def save_atomic(obj, path):
+def save_model(obj, path):
     # Write to a temp file first so a crash mid-save never leaves a truncated file behind
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp_path = path + ".tmp"
@@ -120,6 +126,9 @@ def main():
         "--resume", action="store_true", help=f"continue from {CHECKPOINT_PATH}"
     )
     args = parser.parse_args()
+
+    mlflow.set_experiment("PointNet")
+    # mlflow.set_tracking_uri("localhost:8000")
 
     params = load_params(args.params)
     data_params, model_params, train_params = (
@@ -165,7 +174,7 @@ def main():
         gamma=train_params["lr_gamma"],
     )
 
-    start_epoch, best_val_acc = 0, -1.0
+    start_epoch, best_val_accuracy = 0, -1.0
     if args.resume:
         # weights_only=False: the checkpoint holds Python/NumPy RNG state, not just tensors.
         # map_location="cpu": RNG states must stay on CPU; load_state_dict moves the rest to device.
@@ -176,69 +185,103 @@ def main():
         set_rng_state(checkpoint["rng"])
         loader_generator.set_state(checkpoint["loader_generator"])
         start_epoch = checkpoint["epoch"] + 1
-        best_val_acc = checkpoint["best_val_acc"]
+        best_val_accuracy = checkpoint["best_val_accuracy"]
         print(
-            f"resumed from {CHECKPOINT_PATH} at epoch {start_epoch} (best val acc {best_val_acc:.4f})"
+            f"resumed from {CHECKPOINT_PATH} at epoch {start_epoch} (best val acc {best_val_accuracy:.4f})"
         )
     reset_log(keep_before_epoch=start_epoch)
 
-    for epoch in range(start_epoch, train_params["epochs"]):
-        start = time.time()
-        lr = optimizer.param_groups[0]["lr"]
-        train_loss, train_acc = run_epoch(
-            classifier,
-            train_loader,
-            device,
-            epoch,
-            optimizer,
-            train_params["feature_transform_weight"],
-        )
-        val_loss, val_acc = run_epoch(classifier, val_loader, device, epoch)
-        scheduler.step()
+    with mlflow.start_run() as run:
+        # log hyperparameters
+        mlflow.log_params(params=train_params)
 
-        row = {
-            "epoch": epoch,
-            "lr": lr,
-            "train_loss": round(train_loss, 6),
-            "train_acc": round(train_acc, 6),
-            "val_loss": round(val_loss, 6),
-            "val_acc": round(val_acc, 6),
-            "seconds": round(time.time() - start, 1),
-        }
-        append_log(row)
-        print(
-            f"epoch {epoch}: train loss {train_loss:.4f} acc {train_acc:.4f} | "
-            f"val loss {val_loss:.4f} acc {val_acc:.4f} | lr {lr:g} | {row['seconds']}s"
-        )
+        for epoch in range(start_epoch, train_params["epochs"]):
+            start = time.time()
+            lr = optimizer.param_groups[0]["lr"]
+            train_loss, train_accuracy = run_epoch(
+                classifier,
+                train_loader,
+                device,
+                epoch,
+                optimizer,
+                train_params["feature_transform_weight"],
+            )
+            val_loss, val_accuracy = run_epoch(classifier, val_loader, device, epoch)
+            
+            # Log metrics at each training epoch
+            mlflow.log_metrics({"train_loss": train_loss, "train_accuracy": train_accuracy}, step=epoch)
+            mlflow.log_metrics({"val_loss": val_loss, "val_accuracy": val_accuracy}, step=epoch)
+            mlflow.log_metrics({"learning_rate": lr}, step=epoch)
+            
+            scheduler.step()
 
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            save_atomic(
+            row = {
+                "epoch": epoch,
+                "lr": lr,
+                "train_loss": round(train_loss, 6),
+                "train_accuracy": round(train_accuracy, 6),
+                "val_loss": round(val_loss, 6),
+                "val_accuracy": round(val_accuracy, 6),
+                "seconds": round(time.time() - start, 1),
+            }
+            append_log(row)
+            print(
+                f"epoch {epoch}: train loss {train_loss:.4f} acc {train_accuracy:.4f} | "
+                f"val loss {val_loss:.4f} acc {val_accuracy:.4f} | lr {lr:g} | {row['seconds']}s"
+            )
+
+            if val_accuracy > best_val_accuracy:
+                best_val_accuracy = val_accuracy
+                save_model(
+                    {
+                        "model": classifier.state_dict(),
+                        "feature_transform": feature_transform,
+                        "classes": CLASSES,
+                        "epoch": epoch,
+                        "val_accuracy": val_accuracy,
+                    },
+                    MODEL_PATH,
+                )
+                print(f"  new best val acc, saved {MODEL_PATH}")
+                
+                
+            save_model(
                 {
                     "model": classifier.state_dict(),
-                    "feature_transform": feature_transform,
-                    "classes": CLASSES,
+                    "optimizer": optimizer.state_dict(),
+                    "scheduler": scheduler.state_dict(),
+                    "rng": get_rng_state(),
+                    "loader_generator": loader_generator.get_state(),
                     "epoch": epoch,
-                    "val_acc": val_acc,
+                    "best_val_accuracy": best_val_accuracy,
                 },
-                MODEL_PATH,
+                CHECKPOINT_PATH,
             )
-            print(f"  new best val acc, saved {MODEL_PATH}")
 
-        save_atomic(
-            {
-                "model": classifier.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "scheduler": scheduler.state_dict(),
-                "rng": get_rng_state(),
-                "loader_generator": loader_generator.get_state(),
-                "epoch": epoch,
-                "best_val_acc": best_val_acc,
-            },
-            CHECKPOINT_PATH,
+        # set input example to log model to mlflow
+        num_points = data_params["num_points"]
+        input_example = np.random.rand(2, 3, num_points).astype(np.float32)
+        signature = ModelSignature(
+            inputs=Schema([TensorSpec(np.dtype(np.float32), (-1, 3, num_points))]),  # -1 = any batch size
+            outputs=Schema([TensorSpec(np.dtype(np.float32), (-1, NUM_CLASSES))]),
         )
 
-    print(f"done: best val acc {best_val_acc:.4f}, model at {MODEL_PATH}")
+
+        # log final best model in the training run
+        best_model = torch.load(MODEL_PATH, map_location="cpu", weights_only=True)
+        classifier.load_state_dict(best_model["model"])
+        classifier.to("cpu").eval()
+
+        mlflow.log_metrics({"best_val_accuracy": best_model["val_accuracy"], "best_epoch": best_model["epoch"]})
+        mlflow.pytorch.log_model(
+            pytorch_model=classifier, 
+            name="pointnet-model", 
+            input_example=input_example, 
+            signature=signature
+        )
+       
+
+    print(f"done: best val acc {best_val_accuracy:.4f}, model at {MODEL_PATH}")
 
 
 if __name__ == "__main__":
