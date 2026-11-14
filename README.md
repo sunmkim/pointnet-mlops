@@ -20,6 +20,7 @@ uv run python -m pointnet_mlops.prepare
 uv run python -m pointnet_mlops.train            # fresh run
 uv run python -m pointnet_mlops.train --resume   # continue after an interruption
 ```
+With two or more CUDA GPUs visible, training runs one process per GPU with `DistributedDataParallel`. `batch_size` in `params.yaml` is per GPU. Set `CUDA_VISIBLE_DEVICES` to limit which GPUs are used.
 
 ### Model Evals
 ```
