@@ -155,6 +155,20 @@ class PointNetCls(nn.Module):
         return F.log_softmax(x, dim=1), trans, trans_feat
 
 
+class LogProbsOnly(nn.Module):
+    """Wraps PointNetCls so forward returns only the class log-probabilities.
+
+    Used when logging to MLflow, whose pyfunc wrapper needs a single output tensor.
+    """
+
+    def __init__(self, classifier):
+        super().__init__()
+        self.classifier = classifier
+
+    def forward(self, x):
+        return self.classifier(x)[0]
+
+
 class PointNetDenseCls(nn.Module):
     def __init__(self, k=2, feature_transform=False):
         super().__init__()

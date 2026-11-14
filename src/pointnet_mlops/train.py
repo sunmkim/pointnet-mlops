@@ -34,7 +34,7 @@ from mlflow.models import ModelSignature
 from mlflow.types import Schema, TensorSpec
 
 from pointnet_mlops.data import CLASSES, NUM_CLASSES, ModelNet10Dataset
-from pointnet_mlops.model import PointNetCls, feature_transform_regularizer
+from pointnet_mlops.model import LogProbsOnly, PointNetCls, feature_transform_regularizer
 from pointnet_mlops.utils import (
     get_device,
     get_rng_state,
@@ -418,8 +418,14 @@ def train(local_rank, world_size, args):
             classifier.to("cpu").eval()
 
             mlflow.log_metrics({"best_val_accuracy": best_model["val_accuracy"], "best_epoch": best_model["epoch"]})
+
+            # The exported (pt2) model is locked to CPU. Without this, MLflow reloads it on
+            # CUDA to check the input example and warns that it can't.
+            os.environ.setdefault("MLFLOW_DEFAULT_PREDICTION_DEVICE", "cpu")
+
+            # Log only the log-probabilities output, which is what the signature declares
             mlflow.pytorch.log_model(
-                pytorch_model=classifier,
+                pytorch_model=LogProbsOnly(classifier).eval(),
                 name="pointnet-model",
                 input_example=input_example,
                 signature=signature
@@ -452,6 +458,7 @@ def main():
 
     # One process per visible GPU; CUDA_VISIBLE_DEVICES limits which ones are used
     world_size = torch.cuda.device_count()
+    print(f"Number of GPUs available: {world_size}")
     if world_size > 1:
         # Starts world_size fresh Python processes and waits for them all to finish.
         # Each one calls train_worker(i, *args), where spawn supplies i = 0..world_size-1
