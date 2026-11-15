@@ -9,6 +9,7 @@ dependencies = [
     "numpy>=2.5.4",
     "pip>=26.2.2",
     "pyyaml>=6.0.3",
+    "ray[serve]>=2.60.0",
     "torch>=2.14.1",
     "tqdm>=4.70.1",
     "trimesh>=5.1.1",
