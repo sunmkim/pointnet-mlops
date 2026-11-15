@@ -183,6 +183,20 @@ class PointNetDenseCls(nn.Module):
         return x, trans, trans_feat
 
 
+class LogProbsOnly(nn.Module):
+    """Wraps PointNetCls so forward returns only the class log-probabilities.
+
+    Used when logging to MLflow, whose pyfunc wrapper needs a single output tensor.
+    """
+
+    def __init__(self, classifier):
+        super().__init__()
+        self.classifier = classifier
+
+    def forward(self, x):
+        return self.classifier(x)[0]
+
+
 def feature_transform_regularizer(trans):
     d = trans.size()[1]
     batchsize = trans.size()[0]
@@ -191,33 +205,3 @@ def feature_transform_regularizer(trans):
         torch.norm(torch.bmm(trans, trans.transpose(2, 1)) - I, dim=(1, 2))
     )
     return loss
-
-
-# if __name__ == "__main__":
-#     sim_data = Variable(torch.rand(32, 3, 2500))
-#     trans = STN3d()
-#     out = trans(sim_data)
-#     print("stn", out.size())
-#     print("loss", feature_transform_regularizer(out))
-
-#     sim_data_64d = Variable(torch.rand(32, 64, 2500))
-#     trans = STNkd(k=64)
-#     out = trans(sim_data_64d)
-#     print("stn64d", out.size())
-#     print("loss", feature_transform_regularizer(out))
-
-#     pointfeat = PointNetfeat(global_feat=True)
-#     out, _, _ = pointfeat(sim_data)
-#     print("global feat", out.size())
-
-#     pointfeat = PointNetfeat(global_feat=False)
-#     out, _, _ = pointfeat(sim_data)
-#     print("point feat", out.size())
-
-#     cls = PointNetCls(k=5)
-#     out, _, _ = cls(sim_data)
-#     print("class", out.size())
-
-#     seg = PointNetDenseCls(k=3)
-#     out, _, _ = seg(sim_data)
-#     print("seg", out.size())

@@ -1,4 +1,4 @@
-"""Train PointNet on the prepared ModelNet10 train split, selecting the best epoch on val.
+"""Train PointNet on the prepared ModelNet10 data train split, selecting the best epoch on val.
 
 With two or more CUDA devices visible, training is data-parallel: one process per GPU,
 each wrapping its own model replica in DistributedDataParallel and training on a
@@ -32,9 +32,10 @@ import mlflow
 import mlflow.pytorch
 from mlflow.models import ModelSignature
 from mlflow.types import Schema, TensorSpec
+from mlflow.tracking import MlflowClient
 
 from pointnet_mlops.data import CLASSES, NUM_CLASSES, ModelNet10Dataset
-from pointnet_mlops.model import PointNetCls, feature_transform_regularizer
+from pointnet_mlops.model import LogProbsOnly, PointNetCls, feature_transform_regularizer
 from pointnet_mlops.utils import (
     get_device,
     get_rng_state,
@@ -192,7 +193,7 @@ def train(local_rank, world_size, args):
 
     if is_main:
         mlflow.set_experiment("PointNet")
-        # mlflow.set_tracking_uri("localhost:8000")
+        mlflow.set_tracking_uri("http://127.0.0.1:5000")
 
     params = load_params(args.params)
     data_params, model_params, train_params = (
@@ -204,6 +205,10 @@ def train(local_rank, world_size, args):
     for key in ("lr", "lr_gamma", "feature_transform_weight"):
         train_params[key] = float(train_params[key])
 
+    # --epochs on the command line takes precedence over params.yaml
+    if args.epochs is not None:
+        train_params["epochs"] = args.epochs
+
     seed = train_params["seed"]
 
     # Offset by rank so each process draws different dropout masks and augmentation noise
@@ -214,6 +219,7 @@ def train(local_rank, world_size, args):
     if is_main:
         print(f"device: {device}  processes: {world_size}")
 
+    # load torch dataset
     train_dataset = ModelNet10Dataset(
         data_params["prepared_dir"], "train", data_augmentation=True
     )
@@ -274,6 +280,7 @@ def train(local_rank, world_size, args):
         # weights_only=False: the checkpoint holds Python/NumPy RNG state, not just tensors.
         # map_location="cpu": RNG states must stay on CPU; load_state_dict moves the rest to device.
         checkpoint = torch.load(CHECKPOINT_PATH, map_location="cpu", weights_only=False)
+        
         # Every process loads the same file, so all replicas resume from identical state
         classifier.load_state_dict(checkpoint["model"])
         optimizer.load_state_dict(checkpoint["optimizer"])
@@ -290,6 +297,7 @@ def train(local_rank, world_size, args):
             # The saved RNG states are rank 0's; other ranks start from a fresh seed
             seed_everything(seed + local_rank + start_epoch)
             loader_generator.manual_seed(seed + local_rank + start_epoch)
+    
     if is_main:
         # Start the CSV log afresh, or on resume keep only the epochs before start_epoch
         reset_log(keep_before_epoch=start_epoch)
@@ -311,8 +319,10 @@ def train(local_rank, world_size, args):
                 train_sampler.set_epoch(epoch)
 
             start = time.time()
+            
             # Read the learning rate now: scheduler.step() below changes it for the next epoch
             lr = optimizer.param_groups[0]["lr"]
+            
             # Trains on this process's shard only; returns sums for that shard
             train_totals = run_epoch(
                 train_model,
@@ -323,6 +333,7 @@ def train(local_rank, world_size, args):
                 train_params["feature_transform_weight"],
                 show_progress=is_main,
             )
+            
             if distributed:
                 # Add up loss, correct and seen over all processes. all_reduce replaces the
                 # tensor on every rank with the sum of that tensor across all ranks, so the
@@ -418,12 +429,19 @@ def train(local_rank, world_size, args):
             classifier.to("cpu").eval()
 
             mlflow.log_metrics({"best_val_accuracy": best_model["val_accuracy"], "best_epoch": best_model["epoch"]})
-            mlflow.pytorch.log_model(
-                pytorch_model=classifier,
+
+            # The exported (pt2) model is locked to CPU. Without this, MLflow reloads it on CUDA to check the input example and warns that it can't.
+            os.environ.setdefault("MLFLOW_DEFAULT_PREDICTION_DEVICE", "cpu")
+
+            # Log only the log-probabilities output, which is what the signature declares
+            model_info = mlflow.pytorch.log_model(
+                pytorch_model=LogProbsOnly(classifier).eval(),
+                registered_model_name="pointnet",
                 name="pointnet-model",
                 input_example=input_example,
                 signature=signature
             )
+            print(f"Registered version: {model_info.registered_model_version}")
 
     if is_main:
         print(f"done: best val acc {best_val_accuracy:.4f}, model at {MODEL_PATH}")
@@ -448,10 +466,19 @@ def main():
     parser.add_argument(
         "--resume", action="store_true", help=f"continue from {CHECKPOINT_PATH}"
     )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=None,
+        help="total epochs to train (default: train.epochs in params.yaml)",
+    )
     args = parser.parse_args()
+    if args.epochs is not None and args.epochs < 1:
+        parser.error("--epochs must be at least 1")
 
     # One process per visible GPU; CUDA_VISIBLE_DEVICES limits which ones are used
     world_size = torch.cuda.device_count()
+    print(f"Number of GPUs available: {world_size}")
     if world_size > 1:
         # Starts world_size fresh Python processes and waits for them all to finish.
         # Each one calls train_worker(i, *args), where spawn supplies i = 0..world_size-1
